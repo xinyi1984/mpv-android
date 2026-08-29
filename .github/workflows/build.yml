@@ -38,7 +38,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install autoconf pkgconf libtool ninja-build cmake python3-pip gperf
           sudo pip3 install meson
-
       - name: Download or build deps
         run: |
           mkdir -p "$CACHE_FOLDER"
@@ -52,18 +51,39 @@ jobs:
           MPV_ANDROID_NATIVE_ONLY: "1"
         run: |
           buildscripts/include/ci.sh build
-
-      - name: Export renderer SDK
-        run: bash buildscripts/export-renderer-sdk.sh
-
       - uses: actions/upload-artifact@v7
         with:
           name: mpv-android-fongmi
           path: app/src/main/libs/**/*.so
           if-no-files-found: error
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: mpv-android-renderer-sdk
-          path: build/renderer-sdk/**
-          if-no-files-found: error
+      
+      - name: 推送 so 到 tv fongmi 分支
+        run: |
+          set -e
+          echo "克隆 tv 仓库 (fongmi 分支)..."
+          git clone --depth 2 --branch fongmi \
+            "https://${{ secrets.PUSH_TOKEN }}@github.com/xinyi1984/tv.git" \
+            tv_repo || { echo "❌ 克隆失败"; exit 1; }
+          # 确保目标目录存在并清空旧文件
+          rm -rf tv_repo/app/src/main/jniLibs
+          mkdir -p tv_repo/app/src/main/jniLibs
+          # 复制本次构建的 .so 文件
+          cp -r app/src/main/libs/* tv_repo/app/src/main/jniLibs/ 2>/dev/null || true
+          cd tv_repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git add app/src/main/jniLibs/ && git commit -m "Update mpv so"; then
+            echo "有变更，准备推送..."
+            git fetch origin fongmi --force
+            if git push origin fongmi --force-with-lease; then
+              echo "✅ 推送成功（force-with-lease）"
+            else
+              echo "⚠️ 推送失败，尝试强制推送..."
+              git push origin fongmi --force
+            fi
+          else
+            echo "ℹ️ 无变更，跳过提交"
+          fi
+          cd ..
+          rm -rf tv_repo
+          echo "✅ .so 推送完成"
